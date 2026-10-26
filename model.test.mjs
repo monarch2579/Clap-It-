@@ -1,36 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {cloneDefaults,validate,thresholds,createDetector,feed,expire,lampFor,configCode} from '../dist/model.mjs';
-test('threshold crossing counts once until release; debounce blocks echoes',()=>{
- const c=cloneDefaults(),d=createDetector();
- assert.equal(feed(d,c,259,0).accepted,false);
- assert.equal(feed(d,c,260,1).accepted,true);
- assert.equal(feed(d,c,500,100).accepted,false);
- feed(d,c,80,120);
- assert.equal(feed(d,c,300,130).accepted,false);
- assert.equal(feed(d,c,300,200).accepted,false,'held-high echo stays latched');
- feed(d,c,200,220);
- assert.equal(feed(d,c,260,221).accepted,true);
- assert.equal(d.claps.length,2);
-});
-test('sensitivity and 70% release match the effective ADC values',()=>{
- const c=cloneDefaults();c.sensitivity=2;
- assert.deepEqual(thresholds(c),{high:170,release:143});
- const d=createDetector();assert.equal(feed(d,c,170,0).accepted,true);
- feed(d,c,144,200);assert.equal(d.latched,true);
- feed(d,c,143,201);assert.equal(d.latched,false);
- assert.equal(feed(d,c,170,202).accepted,true);
-});
-test('rolling window excludes claps exactly at its age boundary',()=>{
- const c=cloneDefaults(),d=createDetector();feed(d,c,300,0);feed(d,c,80,200);feed(d,c,300,250);
- assert.equal(expire(d,c,4999),2);assert.equal(expire(d,c,5000),1);assert.equal(expire(d,c,5250),0);
-});
-test('all inclusive band boundaries, idle, brightness and colors are preserved',()=>{
- const c=cloneDefaults();
- assert.equal(lampFor(c,0).index,-1);assert.equal(lampFor(c,1).index,0);assert.equal(lampFor(c,2).index,0);assert.equal(lampFor(c,3).index,1);assert.equal(lampFor(c,4).index,1);assert.equal(lampFor(c,5).index,2);assert.equal(lampFor(c,99).index,2);
- c.bands[1].brightness=197;c.bands[1].color='#123456';assert.equal(lampFor(c,3).brightness,197);assert.equal(lampFor(c,3).color,'#123456');
- assert.match(configCode(c),/\{ 3, 197, 18, 52, 86 \}/);
-});
-test('stored or edited configurations reject overlapping ranges and corrupt values',()=>{
- const c=cloneDefaults();assert.equal(validate(c),true);c.bands[1].min=1;assert.equal(validate(c),false);c.bands[1].min=3;c.threshold=NaN;assert.equal(validate(c),false);
-});
+import {cloneDefaults,validate,thresholds,createDetector,feed,advance,recordClap,lampFor,configCode} from './model.mjs';
+function rig(){const c=cloneDefaults(),d=createDetector();let clock=0;return {c,d,wait(ms){clock+=ms;advance(d,c,clock);},gesture(n){for(let i=0;i<n;i++){feed(d,c,300,clock);feed(d,c,80,clock+60);clock+=250;}clock+=c.window;advance(d,c,clock);return clock;}};}
+test('single claps wake, increase twice, then sleep; states do not expire',()=>{const r=rig();assert.equal(lampFor(r.c,r.d).brightness,0);for(const expected of [64,153,255,0]){r.gesture(1);assert.equal(lampFor(r.c,r.d).brightness,expected);}r.gesture(1);advance(r.d,r.c,999999);assert.equal(lampFor(r.c,r.d).brightness,64);});
+test('triple gesture is buffered, without single-clap brightness side effects',()=>{const r=rig();r.gesture(1);const start=2000;for(const time of [start,start+250,start+500]){feed(r.d,r.c,300,time);feed(r.d,r.c,80,time+60);assert.equal(r.d.level,0);assert.equal(r.d.mode,'brightness');}advance(r.d,r.c,start+1100);assert.equal(r.d.mode,'colors');assert.equal(lampFor(r.c,r.d).color,'#ff0000');});
+test('smooth RGB transitions land on each stop every five seconds',()=>{const r=rig();r.gesture(1);const t=r.gesture(3);advance(r.d,r.c,t+2500);assert.equal(lampFor(r.c,r.d).color,'#7f7f00');advance(r.d,r.c,t+5000);assert.equal(lampFor(r.c,r.d).color,'#00ff00');advance(r.d,r.c,t+10000);assert.equal(lampFor(r.c,r.d).color,'#0000ff');advance(r.d,r.c,t+15000);assert.equal(lampFor(r.c,r.d).color,'#ff0000');});
+test('single claps in colors freeze the color and repeated single claps keep it frozen',()=>{const r=rig();r.gesture(1);r.gesture(3);r.gesture(1);assert.equal(r.d.paused,true);const color=lampFor(r.c,r.d).color,level=r.d.level;r.wait(60000);assert.equal(lampFor(r.c,r.d).color,color);r.gesture(1);assert.equal(r.d.paused,true);r.wait(15000);assert.equal(lampFor(r.c,r.d).color,color);assert.equal(r.d.level,level);});
+test('double clap shuts down cycling and paused color modes',()=>{for(const pause of [false,true]){const r=rig();r.gesture(1);r.gesture(3);if(pause)r.gesture(1);r.gesture(2);assert.equal(r.d.mode,'sleep');assert.equal(lampFor(r.c,r.d).brightness,0);r.gesture(1);assert.equal(r.d.mode,'brightness');assert.equal(r.d.level,0);}});
+test('double/triple asleep, double in brightness and four claps are ignored',()=>{const r=rig();r.gesture(3);assert.equal(r.d.mode,'sleep');r.gesture(2);assert.equal(r.d.mode,'sleep');r.gesture(1);r.gesture(2);assert.equal(r.d.level,0);r.gesture(4);assert.equal(r.d.mode,'brightness');assert.equal(r.d.level,0);});
+test('held signals and echoes count once, with exact 70% release boundary',()=>{const c=cloneDefaults(),d=createDetector();c.sensitivity=2;assert.deepEqual(thresholds(c),{high:170,release:143});assert.equal(feed(d,c,169,0).accepted,false);assert.equal(feed(d,c,170,1).accepted,true);assert.equal(feed(d,c,500,200).accepted,false);feed(d,c,144,220);assert.equal(d.latched,true);feed(d,c,143,230);assert.equal(d.latched,false);assert.equal(feed(d,c,170,231).accepted,true);feed(d,c,80,250);assert.equal(feed(d,c,170,260).accepted,false);});
+test('a clap exactly at the quiet gap commits the old gesture before the next',()=>{const c=cloneDefaults(),d=createDetector();feed(d,c,300,0);feed(d,c,80,60);feed(d,c,300,600);assert.equal(d.mode,'brightness');assert.equal(d.pending,1);advance(d,c,1200);assert.equal(d.level,1);});
+test('configuration exports state-machine timing, brightness and RGB palette',()=>{const c=cloneDefaults();assert.equal(validate(c),true);c.bands[0].color='#123456';assert.match(configCode(c),/18, 52, 86/);assert.match(configCode(c),/GESTURE_GAP_MS = 600/);c.window=NaN;assert.equal(validate(c),false);});
+
+test('each explicit button press counts even faster than sensor debounce',()=>{const c=cloneDefaults(),d=createDetector();recordClap(d,c,0,285);advance(d,c,600);assert.equal(d.mode,'brightness');recordClap(d,c,1000,285);recordClap(d,c,1050,285);recordClap(d,c,1100,285);assert.equal(d.pending,3);assert.equal(d.level,0);advance(d,c,1700);assert.equal(d.mode,'colors');recordClap(d,c,2000,285);recordClap(d,c,2050,285);advance(d,c,2650);assert.equal(d.mode,'sleep');});
+
+import {audioReading} from './microphone.mjs';
+test('microphone amplitude maps silence, RMS and saturation into ADC readings',()=>{assert.equal(audioReading(new Float32Array(8),80,8),80);assert.equal(audioReading(new Float32Array([.1,-.1]),80,2),285);assert.equal(audioReading(new Float32Array([1,-1]),80,8),1023);assert.equal(audioReading(new Float32Array(),80,8),80);});
+test('microphone RMS pulses pass through detection into wake and color gestures',()=>{const c=cloneDefaults(),d=createDetector();const quiet=new Float32Array(1024),clap=new Float32Array([.1,-.1]);const pulse=t=>{feed(d,c,audioReading(clap,c.baseline,8),t);feed(d,c,audioReading(quiet,c.baseline,8),t+40);};pulse(0);advance(d,c,600);assert.equal(d.mode,'brightness');pulse(1000);pulse(1250);pulse(1500);advance(d,c,2100);assert.equal(d.mode,'colors');pulse(2400);pulse(2650);advance(d,c,3250);assert.equal(d.mode,'sleep');});
+
+test('brightness commands and color commands remain isolated at every brightness level',()=>{for(let level=0;level<3;level++){const r=rig();r.gesture(1);for(let i=0;i<level;i++)r.gesture(1);assert.equal(r.d.level,level);const brightness=lampFor(r.c,r.d).brightness;r.gesture(3);assert.equal(r.d.mode,'colors');r.gesture(1);assert.equal(lampFor(r.c,r.d).brightness,brightness);r.gesture(3);assert.equal(r.d.mode,'colors');assert.equal(r.d.paused,true);assert.equal(r.d.level,level);r.gesture(2);assert.equal(r.d.mode,'sleep');r.gesture(3);assert.equal(r.d.mode,'sleep');r.gesture(1);assert.equal(r.d.mode,'brightness');assert.equal(r.d.level,0);}});

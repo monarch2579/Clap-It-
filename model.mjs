@@ -1,29 +1,50 @@
-export const DEFAULTS = Object.freeze({baseline:80,threshold:180,sensitivity:1,debounce:180,window:5000,bands:[{min:1,brightness:64,color:'#8fe3bf'},{min:3,brightness:153,color:'#ffcc76'},{min:5,brightness:255,color:'#ff704f'}]});
+export const DEFAULTS = Object.freeze({baseline:80,threshold:180,sensitivity:1,debounce:180,window:600,bands:[{brightness:64,color:'#ff0000'},{brightness:153,color:'#00ff00'},{brightness:255,color:'#0000ff'}]});
 export const cloneDefaults=()=>JSON.parse(JSON.stringify(DEFAULTS));
 export const clamp=(x,a,b)=>Math.min(b,Math.max(a,x));
 export function validate(c){
-  const limits={baseline:[0,1023],threshold:[1,1023],sensitivity:[0.5,3],debounce:[50,1000],window:[1000,10000]};
-  for(const [k,[min,max]] of Object.entries(limits)) if(!Number.isFinite(c[k])||c[k]<min||c[k]>max||(k!=='sensitivity'&&!Number.isInteger(c[k]))) return false;
-  return Array.isArray(c.bands)&&c.bands.length===3&&c.bands.every((b,i)=>Number.isInteger(b.min)&&b.min>=1&&b.min<=99&&(!i||b.min>c.bands[i-1].min)&&Number.isInteger(b.brightness)&&b.brightness>=0&&b.brightness<=255&&/^#[\da-f]{6}$/i.test(b.color));
+ const limits={baseline:[0,1023],threshold:[1,1023],sensitivity:[.5,3],debounce:[50,1000],window:[300,1500]};
+ for(const [k,[a,b]] of Object.entries(limits))if(!Number.isFinite(c[k])||c[k]<a||c[k]>b||(k!=='sensitivity'&&!Number.isInteger(c[k])))return false;
+ return Array.isArray(c.bands)&&c.bands.length===3&&c.bands.every(b=>Number.isInteger(b.brightness)&&b.brightness>=0&&b.brightness<=255&&/^#[\da-f]{6}$/i.test(b.color));
 }
 export function thresholds(c){const gain=Math.round(c.sensitivity*100);return {high:c.baseline+Math.ceil(c.threshold*100/gain),release:c.baseline+Math.floor(c.threshold*70/gain)};}
-export function createDetector(){return {latched:false,lastClap:-Infinity,claps:[],events:[]};}
-export function expire(d,c,now){d.claps=d.claps.filter(t=>now-t<c.window);return d.claps.length;}
-export function feed(d,c,raw,now){
-  expire(d,c,now);
-  const scaledSignal=Math.max(0,raw-c.baseline)*Math.round(c.sensitivity*100),signal=scaledSignal/100;
-  if(scaledSignal<=c.threshold*70)d.latched=false;
-  let accepted=false;
-  if(scaledSignal>=c.threshold*100&&!d.latched){
-    d.latched=true;
-    if(now-d.lastClap>=c.debounce){d.lastClap=now;d.claps.push(now);d.events.push({time:now,raw});d.events=d.events.slice(-100);accepted=true;}
-  }
-  return {accepted,signal,count:d.claps.length};
-}
-export function lampFor(c,count){let index=-1;for(let i=0;i<c.bands.length;i++)if(count>=c.bands[i].min)index=i;return index<0?{index,brightness:0,color:'#000000',min:0}:{...c.bands[index],index};}
+export function createDetector(){return {latched:false,lastClap:-Infinity,events:[],pending:0,lastGesture:0,mode:'sleep',level:0,paused:false,phase:0,lastUpdate:null,lastAction:'Sleeping · clap once to wake'};}
 export function rgb(hex){return [1,3,5].map(i=>parseInt(hex.slice(i,i+2),16));}
-export function configCode(c){
- const bands=c.bands.map(b=>`  { ${b.min}, ${b.brightness}, ${rgb(b.color).join(', ')} }`).join(',\n');
- return `// Clap It! | rising envelope, 10-bit ADC (0..1023)\n// signal = max(0, raw - BASELINE) * sensitivity\nconstexpr uint16_t BASELINE = ${c.baseline};\nconstexpr uint16_t SENSITIVITY_X100 = ${Math.round(c.sensitivity*100)}; // ${c.sensitivity.toFixed(2)}x\nconstexpr uint16_t CLAP_THRESHOLD = ${c.threshold};\nconstexpr uint8_t RELEASE_PERCENT = 70;\nconstexpr uint32_t DEBOUNCE_MS = ${c.debounce};\nconstexpr uint32_t WINDOW_MS = ${c.window};\nstruct Band { uint8_t minClaps, brightness, r, g, b; };\nconstexpr Band BANDS[] = {\n${bands}\n};\n// Select the last band where count >= minClaps.\n// Below the first band: brightness 0, RGB(0, 0, 0).\n// Brightness is global (0..255); RGB values are unscaled.\n// Window keeps claps younger than WINDOW_MS.`;
+export function applyGesture(d,c,count){
+ if(d.mode==='sleep'){if(count===1){d.mode='brightness';d.level=0;d.lastAction='Single clap → awake, brightness level 1';}else d.lastAction=`${count} claps ignored while sleeping`;return;}
+ if(d.mode==='brightness'){
+  if(count===1){if(d.level<2){d.level++;d.lastAction=`Single clap → brightness level ${d.level+1}`;}else{d.mode='sleep';d.lastAction='Single clap → sleeping';}}
+  else if(count===3){d.mode='colors';d.phase=0;d.paused=false;d.lastAction='Triple clap → color cycle started';}
+  else d.lastAction=`${count} claps → no action in brightness mode`;
+ }else if(count===2){d.mode='sleep';d.paused=false;d.lastAction='Double clap → sleeping';}
+ else if(count===1){d.paused=true;d.lastAction='Single clap → current color paused';}
+ else d.lastAction=`${count} claps → no action in color mode`;
 }
-export function detectorCode(){return `// Call updateClaps(raw, millis()) for every sensor sample.\nconstexpr uint16_t CAPACITY = WINDOW_MS / DEBOUNCE_MS + 2;\nuint32_t clapTimes[CAPACITY];\nuint16_t clapCount = 0;\nuint32_t lastClap = 0;\nbool hasClap = false, latched = false;\n\nBand updateClaps(uint16_t raw, uint32_t now) {\n  while (clapCount && uint32_t(now - clapTimes[0]) >= WINDOW_MS) {\n    for (uint16_t i = 1; i < clapCount; ++i)\n      clapTimes[i - 1] = clapTimes[i];\n    --clapCount;\n  }\n  uint32_t signal = uint32_t(raw > BASELINE ? raw - BASELINE : 0) * SENSITIVITY_X100;\n  if (signal <= uint32_t(CLAP_THRESHOLD) * RELEASE_PERCENT) latched = false;\n  if (signal >= uint32_t(CLAP_THRESHOLD) * 100 && !latched) {\n    latched = true;\n    if (!hasClap || uint32_t(now - lastClap) >= DEBOUNCE_MS) {\n      if (clapCount < CAPACITY) clapTimes[clapCount++] = now;\n      lastClap = now; hasClap = true;\n    }\n  }\n  Band output = {0, 0, 0, 0, 0};\n  for (const Band &band : BANDS)\n    if (clapCount >= band.minClaps) output = band;\n  return output;\n}\n// Apply returned brightness and RGB to your LED library.\n// Keep sampling; do not use delay(). Reset state after config changes.`;}
+export function advance(d,c,now){
+ const elapsed=d.lastUpdate===null?0:Math.max(0,now-d.lastUpdate);d.lastUpdate=now;
+ if(d.mode==='colors'&&!d.paused)d.phase=(d.phase+elapsed)%15000;
+ if(d.pending&&now-d.lastGesture>=c.window){const count=d.pending;d.pending=0;applyGesture(d,c,count);}
+}
+// A button press is an explicit clap; physical samples still use threshold/debounce.
+export function recordClap(d,c,now,raw){
+ advance(d,c,now);d.lastClap=now;d.lastGesture=now;d.pending=Math.min(4,d.pending+1);
+ d.events.push({time:now,raw});d.events=d.events.slice(-100);
+}
+export function feed(d,c,raw,now){
+ advance(d,c,now);
+ const scaled=Math.max(0,raw-c.baseline)*Math.round(c.sensitivity*100);
+ if(scaled<=c.threshold*70)d.latched=false;
+ let accepted=false;
+ if(scaled>=c.threshold*100&&!d.latched){d.latched=true;if(now-d.lastClap>=c.debounce){recordClap(d,c,now,raw);accepted=true;}}
+ return {accepted,signal:scaled/100,count:d.pending};
+}
+export function lampFor(c,d){
+ if(d.mode==='sleep')return {index:-1,brightness:0,color:'#000000'};
+ let color='#ffddaa';
+ if(d.mode==='colors'){
+  const i=Math.floor(d.phase/5000)%3,t=(d.phase%5000)/5000,a=rgb(c.bands[i].color),b=rgb(c.bands[(i+1)%3].color);
+  color='#'+a.map((v,j)=>Math.floor(v*(1-t)+b[j]*t).toString(16).padStart(2,'0')).join('');
+ }
+ return {index:d.level,brightness:c.bands[d.level].brightness,color};
+}
+export function configCode(c){return `// Clap It! | 10-bit rising-envelope ADC\nconstexpr uint16_t BASELINE = ${c.baseline};\nconstexpr uint16_t SENSITIVITY_X100 = ${Math.round(c.sensitivity*100)};\nconstexpr uint16_t CLAP_THRESHOLD = ${c.threshold};\nconstexpr uint8_t RELEASE_PERCENT = 70;\nconstexpr uint32_t DEBOUNCE_MS = ${c.debounce};\nconstexpr uint32_t GESTURE_GAP_MS = ${c.window};\nconstexpr uint32_t COLOR_STEP_MS = 5000;\nconstexpr uint8_t BRIGHTNESS[3] = { ${c.bands.map(b=>b.brightness).join(', ')} };\nstruct RGB { uint8_t r, g, b; };\nconstexpr RGB WHITE = {255, 221, 170};\nconstexpr RGB COLORS[3] = {\n${c.bands.map(b=>'  { '+rgb(b.color).join(', ')+' }').join(',\n')}\n};\n// Sleep: 1 clap wakes at level 1.\n// Brightness: 1 clap -> level 2 -> level 3 -> sleep.\n// Awake: 3 claps start colors at the current brightness.\n// Colors: 1 clap freezes the current color; 2 claps turn off.\n// Gestures commit after GESTURE_GAP_MS without another clap.\n// Other gestures are ignored. Brightness is global, RGB unscaled.`;}
+export function detectorCode(){return `enum class Mode { Sleep, Brightness, Colors };\nMode mode = Mode::Sleep;\nuint8_t level = 0, pending = 0;\nbool latched = false, hasClap = false, paused = false, hasTick = false;\nuint32_t lastClap = 0, lastGesture = 0, lastTick = 0, colorPhase = 0;\nstruct LampOutput { uint8_t brightness; RGB color; };\n\nvoid applyGesture(uint8_t count) {\n  if (mode == Mode::Sleep) {\n    if (count == 1) { mode = Mode::Brightness; level = 0; }\n  } else if (mode == Mode::Brightness) {\n    if (count == 1) {\n      if (level < 2) ++level; else mode = Mode::Sleep;\n    } else if (count == 3) {\n      mode = Mode::Colors; colorPhase = 0; paused = false;\n    }\n  } else if (count == 2) { mode = Mode::Sleep; paused = false; }\n  else if (count == 1) paused = true;\n}\n\nuint8_t mixChannel(uint8_t a, uint8_t b, uint32_t phase) {\n  return (uint32_t(a) * (COLOR_STEP_MS - phase) + uint32_t(b) * phase) / COLOR_STEP_MS;\n}\n\n// Call continuously: LampOutput out = updateLamp(raw, millis());\nLampOutput updateLamp(uint16_t raw, uint32_t now) {\n  uint32_t elapsed = hasTick ? uint32_t(now - lastTick) : 0;\n  hasTick = true; lastTick = now;\n  if (mode == Mode::Colors && !paused)\n    colorPhase = (colorPhase + elapsed % (3 * COLOR_STEP_MS)) % (3 * COLOR_STEP_MS);\n  if (pending && uint32_t(now - lastGesture) >= GESTURE_GAP_MS) {\n    uint8_t count = pending; pending = 0; applyGesture(count);\n  }\n  uint32_t signal = uint32_t(raw > BASELINE ? raw - BASELINE : 0) * SENSITIVITY_X100;\n  if (signal <= uint32_t(CLAP_THRESHOLD) * RELEASE_PERCENT) latched = false;\n  if (signal >= uint32_t(CLAP_THRESHOLD) * 100 && !latched) {\n    latched = true;\n    if (!hasClap || uint32_t(now - lastClap) >= DEBOUNCE_MS) {\n      hasClap = true; lastClap = now; lastGesture = now;\n      if (pending < 4) ++pending;\n    }\n  }\n  if (mode == Mode::Sleep) return {0, {0, 0, 0}};\n  RGB color = WHITE;\n  if (mode == Mode::Colors) {\n    uint8_t i = colorPhase / COLOR_STEP_MS;\n    uint32_t phase = colorPhase % COLOR_STEP_MS;\n    RGB a = COLORS[i], b = COLORS[(i + 1) % 3];\n    color = {mixChannel(a.r, b.r, phase), mixChannel(a.g, b.g, phase), mixChannel(a.b, b.b, phase)};\n  }\n  return {BRIGHTNESS[level], color};\n}\n// Apply returned global brightness and RGB with your LED library.\n// No delay(): keep sampling, even while a color is paused.`;}

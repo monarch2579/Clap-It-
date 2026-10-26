@@ -2,11 +2,11 @@
   "name": "clap-it-calibration",
   "private": true,
   "type": "module",
+  "description": "Sound sensor and microphone calibration with gesture-driven lamp simulation",
   "scripts": {
-    "test": "node --test tests/model.test.mjs",
-    "dev": "python3 -m http.server 8000 --directory dist"
+    "test": "node --test model.test.mjs",
+    "dev": "python3 -m http.server 8000"
   },
-  "description": "Interactive sound sensor calibration and LED response simulator for Clap It!",
   "engines": {
     "node": ">=18"
   }
