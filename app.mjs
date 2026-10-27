@@ -1,9 +1,9 @@
 import {audioReading} from './microphone.mjs';
 import {cloneDefaults,validate,clamp,thresholds,createDetector,feed,advance,recordClap,lampFor,rgb,configCode,detectorCode} from './model.mjs';
 const $=id=>document.getElementById(id);
-const STORAGE_KEY='clap-it-calibration-v2';
+const STORAGE_KEY='clap-it-calibration-v3';
 let config=cloneDefaults(),storageAvailable=true;
-try{const saved=JSON.parse(localStorage.getItem(STORAGE_KEY));if(saved&&validate(saved))config=saved;}catch{storageAvailable=false;}
+try{const saved=JSON.parse(localStorage.getItem(STORAGE_KEY));if(saved&&validate(saved))config=saved;else {const previous=JSON.parse(localStorage.getItem('clap-it-calibration-v2'));if(previous&&validate(previous))config={...previous,debounce:220,window:700};}}catch{storageAvailable=false;}
 let detector=createDetector(),history=[],mode='manual',raw=config.baseline,manualValue=raw,lastTick=0,lastDetected=-Infinity,sessionStart=performance.now(),pulseUntil=0,nextDemoPulse=0,demoPulseUntil=0,serialPort=null,serialReader=null,connecting=false;
 let pulses=[], demoStep=0;
 let microphone=null, requestingMic=false, microphoneGain=8;
@@ -72,7 +72,8 @@ function renderOutput(now=performance.now()){
  advance(detector,config,now);
  const count=detector.pending,lamp=lampFor(config,detector),percent=Math.round(lamp.brightness/255*100);
  $('clapCount').innerHTML=`${count===4?'4+':count}<span> clap${count===1?'':'s'}</span>`;
- $('windowLabel').textContent=count?`Recognizing in ${(Math.max(0,config.window-(now-detector.lastGesture))/1000).toFixed(1)} s`:'Ready for the next gesture';
+ $('windowLabel').textContent=count?`Pause ${(Math.max(0,config.window-(now-detector.lastGesture))/1000).toFixed(1)} s to finish`:'Ready for a new sequence';
+ if(!count&&detector.completed)$('eventNote').textContent=`Sequence complete · ${detector.lastCount===4?'4+':detector.lastCount} clap${detector.lastCount===1?'':'s'} · count reset`;
  $('brightnessPercent').innerHTML=`${percent}<span>%</span>`;
  $('lampLabel').textContent=detector.mode==='sleep'?'Sleeping · clap once to wake':detector.mode==='colors'?(detector.paused?'Color paused':'RGB color cycle'):`Level ${lamp.index+1} · ${percent}% brightness`;
  $('gestureResult').textContent=detector.lastAction;
@@ -86,7 +87,7 @@ function renderOutput(now=performance.now()){
  $('outputSwatch').style.background=lamp.color;$('outputRGB').textContent=`RGB ${rgb(lamp.color).join(', ')}`;$('outputBrightness').textContent=`${lamp.brightness} / 255`;
  for(let i=0;i<3;i++)$(`band${i}`).classList.toggle('is-active',lamp.index===i);
  const recent=now-lastDetected<400;
- $('detectorStatus').textContent=recent?'Clap detected':detector.latched?'Rearm below release':'Listening';
+ $('detectorStatus').textContent=recent?'Clap detected':detector.latched?'Rearm below release':count?'Counting claps':'Listening';
  $('detectorStatus').style.color=recent?'#d46a35':detector.latched?'#9b7a40':'#3d6244';
 }
 function drawChart(now){
@@ -143,7 +144,7 @@ $('testClap').addEventListener('click',()=>{
  recordClap(detector,config,now,peak);detector.latched=true;lastDetected=now;
  pulses.push({start:now,end:now+95});
  sample(peak,now);
- $('eventNote').textContent=`${detector.pending===4?'4+':detector.pending} clap${detector.pending===1?'':'s'} recorded · keep clicking for a group`;
+ $('eventNote').textContent=`${detector.pending===4?'4+':detector.pending} clap${detector.pending===1?'':'s'} recorded · clap again now, or pause to finish`;
  renderOutput(now);drawChart(now);
 });
 if(!('serial' in navigator)){$('serialButton').disabled=true;$('serialButton').title='Web Serial requires a supported desktop browser such as Chrome or Edge.';$('sourceNote').textContent+=' Serial input requires desktop Chrome or Edge.';}

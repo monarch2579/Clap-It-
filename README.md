@@ -18,7 +18,7 @@ Other gestures, including double/triple claps while asleep, are ignored. Four or
 
 - Assumes a 10-bit, rising-envelope signal (0–1023 ADC), not an unprocessed AC microphone waveform.
 - Signal is `max(0, raw - baseline) × sensitivity`. A threshold crossing registers once; the reading must drop to 70% of the threshold to rearm. Debounce rejects echoes.
-- The gesture is committed after 600 ms without another accepted clap (adjustable). Until then, individual claps do not change the lamp state. The minimum clap gap must be shorter than this quiet gap.
+- The gesture is committed after 700 ms without another accepted clap (adjustable). Until then, individual claps do not change the lamp state. The minimum clap gap must be shorter than this quiet gap.
 - The lamp state persists; it does not turn off because a count window expires. Calibration timing changes and Clear session reset the simulation to sleep.
 - Brightness and palette edits update the current preview without resetting the state.
 
@@ -26,7 +26,7 @@ Other gestures, including double/triple claps while asleep, are ignored. Four or
 
 Manual input holds a reading steady. One Clap button records one clap per click, including rapid clicks. Click the same button twice or three times before the gesture quiet gap expires to issue those commands. Each click shows an illustrative chart pulse. Threshold and debounce filtering apply to manual and serial sensor readings; explicit button clicks bypass these filters. The demo stream still simulates sensor pulses. Demo stream is explicitly simulated. Optional Web Serial requires a supporting desktop browser, 115200 baud, and one ADC integer per line; close other serial monitors before connecting. Serial timing is based on browser arrival time and is intended for calibration, not high-frequency waveform analysis.
 
-Settings use the v2 storage key; the previous rate-mapping configuration is not reused. Configuration is saved to this browser's local storage. Sensor readings stay in memory and are never sent to a server. The lamp is a visual approximation and does not drive hardware. Defaults are starting values, not measurements from a specific sensor.
+Settings use the v3 storage key; the previous rate-mapping configuration is not reused. Configuration is saved to this browser's local storage. Sensor readings stay in memory and are never sent to a server. The lamp is a visual approximation and does not drive hardware. Defaults are starting values, not measurements from a specific sensor.
 
 The configuration and optional non-blocking detector helper can be copied separately. Paste the configuration first; apply the returned RGB and global brightness with the project's LED library. The website does not assign hardware pins or overwrite existing Arduino code.
 
@@ -51,3 +51,7 @@ The C++ controller was compiled with C++11 and checked for brightness sequencing
 Click **Start microphone**, grant browser permission, and clap near the microphone. Audio is processed locally with Web Audio and is not recorded or uploaded. RMS amplitude is converted into the sensor's ADC scale (baseline + RMS × 1023 × gain). The default microphone gain is 8×; adjust it and the existing threshold/sensitivity to separate room noise from claps. The same debounce and gesture controller drive the lamp. This is amplitude-based detection, so speech and other sharp sounds can trigger it. Press **Stop microphone**, select another source, or leave the page to stop the audio tracks. Microphone access requires HTTPS or localhost.
 
 The command modes are exclusive: color-mode single claps never increase brightness, including when paused. Triple claps cannot wake a sleeping lamp and have no action once already in colors. To leave a paused color, double-clap to turn off, then single-clap to wake in brightness mode.
+
+## Human clap sequences
+
+Each consecutive burst is one command. At the defaults, leave roughly 0.3–0.6 seconds between claps and pause for 0.7 seconds to finish. The command executes once and its count immediately resets. Separate single claps cannot accumulate into a future double or triple. The microphone continues listening for a fresh command. Sensor echo filtering defaults to 220 ms; the finish pause remains adjustable. A one-time v2-to-v3 preference migration keeps sensor calibration and updates timing defaults.

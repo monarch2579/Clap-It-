@@ -6,8 +6,8 @@ constexpr uint16_t BASELINE = 80;
 constexpr uint16_t SENSITIVITY_X100 = 100;
 constexpr uint16_t CLAP_THRESHOLD = 180;
 constexpr uint8_t RELEASE_PERCENT = 70;
-constexpr uint32_t DEBOUNCE_MS = 180;
-constexpr uint32_t GESTURE_GAP_MS = 600;
+constexpr uint32_t DEBOUNCE_MS = 220;
+constexpr uint32_t GESTURE_GAP_MS = 700;
 constexpr uint32_t COLOR_STEP_MS = 5000;
 constexpr uint8_t BRIGHTNESS[3] = { 64, 153, 255 };
 struct RGB { uint8_t r, g, b; };
@@ -21,5 +21,6 @@ constexpr RGB COLORS[3] = {
 // Brightness: 1 clap -> level 2 -> level 3 -> sleep.
 // Awake: 3 claps start colors at the current brightness.
 // Colors: 1 clap freezes the current color; 2 claps turn off.
-// Gestures commit after GESTURE_GAP_MS without another clap.
+// Only consecutive claps belong to the same command.
+// A quiet gap ends the command and resets its count to zero.
 // Other gestures are ignored. Brightness is global, RGB unscaled.
