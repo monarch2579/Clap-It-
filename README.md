@@ -1,57 +1,63 @@
 # Clap It! — Calibration Lab
 
-A buildless calibration bench for an Arduino sound-reactive lamp. Serve the repository root through a static server. Run model checks with `npm test`.
+A buildless sound-sensor calibration tool and lamp simulator with one Clap button, manual ADC input, microphone input, a simulated stream, and optional Arduino serial input.
 
 ## Lamp commands
 
-| State | Gesture | Response |
+| Current state | Consecutive claps | Response |
 | --- | --- | --- |
-| Sleeping | Single clap | Wake at low brightness |
-| Brightness | Single clap | Low → medium → high → sleep (LED off) |
-| Brightness, awake | Triple clap | Enter RGB cycle at current brightness |
-| Color cycle | Single clap | Freeze the current color; further single claps keep it frozen |
-| Color cycle, including paused | Double clap | Sleep and turn LED off |
+| Sleeping | 1 | Wake in warm white at brightness level 1 |
+| Sleeping | 2 or more | Wake directly into the RGB color cycle at level 1 |
+| Brightness mode | 1 | Level 1 → level 2 → level 3 → sleep / LED off |
+| Brightness mode | 3 or more | Start colors at the current brightness |
+| Colors, cycling or paused | 1 | Pause at the current color, or resume from that exact color |
+| Colors, cycling or paused | 2 or more | Sleep and turn off |
 
-Other gestures, including double/triple claps while asleep, are ignored. Four or more claps in one gesture are ignored. The RGB palette defaults to red → green → blue, interpolating continuously over five seconds to each next color. Brightness mode uses warm white. Color mode retains the brightness level from before activation.
+Two claps in brightness mode have no action. Commands are evaluated in the current mode: for example, four claps while sleeping start colors once; four claps while already in colors turn off once. Extra claps in one sequence never spill into a second command. Single claps do not adjust brightness in color mode.
 
-## Calibration model
-
-- Assumes a 10-bit, rising-envelope signal (0–1023 ADC), not an unprocessed AC microphone waveform.
-- Signal is `max(0, raw - baseline) × sensitivity`. A threshold crossing registers once; the reading must drop to 70% of the threshold to rearm. Debounce rejects echoes.
-- The gesture is committed after 700 ms without another accepted clap (adjustable). Until then, individual claps do not change the lamp state. The minimum clap gap must be shorter than this quiet gap.
-- The lamp state persists; it does not turn off because a count window expires. Calibration timing changes and Clear session reset the simulation to sleep.
-- Brightness and palette edits update the current preview without resetting the state.
-
-## Inputs and persistence
-
-Manual input holds a reading steady. One Clap button records one clap per click, including rapid clicks. Click the same button twice or three times before the gesture quiet gap expires to issue those commands. Each click shows an illustrative chart pulse. Threshold and debounce filtering apply to manual and serial sensor readings; explicit button clicks bypass these filters. The demo stream still simulates sensor pulses. Demo stream is explicitly simulated. Optional Web Serial requires a supporting desktop browser, 115200 baud, and one ADC integer per line; close other serial monitors before connecting. Serial timing is based on browser arrival time and is intended for calibration, not high-frequency waveform analysis.
-
-Settings use the v3 storage key; the previous rate-mapping configuration is not reused. Configuration is saved to this browser's local storage. Sensor readings stay in memory and are never sent to a server. The lamp is a visual approximation and does not drive hardware. Defaults are starting values, not measurements from a specific sensor.
-
-The configuration and optional non-blocking detector helper can be copied separately. Paste the configuration first; apply the returned RGB and global brightness with the project's LED library. The website does not assign hardware pins or overwrite existing Arduino code.
-
-## Run locally
-
-No dependencies or build step are required. With Python 3 installed, run `python3 -m http.server 8000` (or `npm run dev`) from the repository root and open http://localhost:8000. Serve over HTTP rather than opening index.html directly, because the app uses JavaScript modules. Run `npm test` with Node.js 18 or later.
-
-## Files and hosting
-
-The site uses the existing root-level layout: `index.html`, `style.css`, `app.mjs`, `model.mjs`, and `microphone.mjs`. Tests live in `model.test.mjs`; the GitHub Actions workflow runs tests and syntax checks without deployment steps. The existing CNAME remains unchanged.
-
-Standalone files have no authentication. The separate private Sites deployment keeps its existing access controls. No Sites identity, credentials, sensor readings, or captured audio are included in this repository.
-
-## Arduino/C++ files
-
-`firmware/ClapItConfig.h` and `firmware/ClapItController.h` contain the default configuration and hardware-independent non-blocking controller. Include `ClapItController.h` in one sketch translation unit, then call `updateLamp(rawReading, millis())` continuously. Apply the returned `.brightness` (0–255, global) and `.color.r/g/b` (unscaled RGB) with your LED library. Replace the configuration with the website's copied values after calibration. Pins and LED drivers depend on your hardware and are intentionally left to the sketch.
-
-The C++ controller was compiled with C++11 and checked for brightness sequencing, blended RGB values, exact color holding, repeated pause commands, shutdown, and unsigned `millis()` rollover. Physical Arduino input remains untested.
-
-## Microphone mode
-
-Click **Start microphone**, grant browser permission, and clap near the microphone. Audio is processed locally with Web Audio and is not recorded or uploaded. RMS amplitude is converted into the sensor's ADC scale (baseline + RMS × 1023 × gain). The default microphone gain is 8×; adjust it and the existing threshold/sensitivity to separate room noise from claps. The same debounce and gesture controller drive the lamp. This is amplitude-based detection, so speech and other sharp sounds can trigger it. Press **Stop microphone**, select another source, or leave the page to stop the audio tracks. Microphone access requires HTTPS or localhost.
-
-The command modes are exclusive: color-mode single claps never increase brightness, including when paused. Triple claps cannot wake a sleeping lamp and have no action once already in colors. To leave a paused color, double-clap to turn off, then single-clap to wake in brightness mode.
+The default RGB palette is red → green → blue. Each transition smoothly interpolates to the next color over five seconds. Pause holds the exact color indefinitely; resume continues the remaining transition without restarting. The palette and three brightness levels are editable. Warm white is used only in brightness mode.
 
 ## Human clap sequences
 
-Each consecutive burst is one command. At the defaults, leave roughly 0.3–0.6 seconds between claps and pause for 0.7 seconds to finish. The command executes once and its count immediately resets. Separate single claps cannot accumulate into a future double or triple. The microphone continues listening for a fresh command. Sensor echo filtering defaults to 220 ms; the finish pause remains adjustable. A one-time v2-to-v3 preference migration keeps sensor calibration and updates timing defaults.
+Clap consecutively at a normal rhythm, roughly 0.3–0.6 seconds between claps at the defaults. A 0.7-second quiet gap ends the sequence, executes its command once, and resets the count. Separate single claps never accumulate later. The interface shows the pending count, the time to finish, and confirmation that the sequence ended. Listening continues for the next command.
+
+Sensor echo filtering defaults to 220 ms. The quiet gap is adjustable and must be longer than the minimum clap gap. The count saturates at 4+ internally, which preserves both the 3+ and 2+ command rules without unbounded counting.
+
+## Inputs and calibration
+
+- **Clap button:** each click explicitly records one clap, bypassing sensor threshold/debounce filtering. Click the same button multiple times in a row, then pause. The chart pulse is illustrative.
+- **Manual:** enter a 0–1023 ADC reading. The detector assumes a rising-envelope signal: `max(0, reading - baseline) × sensitivity`. A crossing at the threshold counts once; the reading must return below 70% of the threshold to rearm. Echo filtering rejects repeats inside the minimum gap.
+- **Microphone:** click Start microphone and grant browser permission. RMS amplitude maps to `baseline + RMS × 1023 × microphone gain`. Tune gain, sensitivity and threshold to separate room noise from claps. This detects amplitude; voices and other sharp sounds can trigger it. Audio is processed locally, never recorded or uploaded. Stop microphone, change source, or leave the page to release audio tracks. HTTPS or localhost is required.
+- **Demo stream:** simulated sensor pulses; no microphone is used.
+- **Arduino serial:** in supporting desktop browsers, connect at 115200 baud and send one integer reading per line with `Serial.println(reading)`. Close other serial monitors first. Arrival timing is for calibration, not high-frequency waveform analysis.
+
+Configuration is stored in browser local storage under the v3 key. One-time migration retains v2 sensor calibration and updates timing defaults. Detection/timing edits and Clear session put the simulation to sleep. Brightness/palette edits preserve its current state. The preview approximates LED appearance and does not output to hardware.
+
+## Run locally
+
+No dependencies or build step are needed. From the project root:
+
+```sh
+python3 -m http.server 8000
+```
+
+Open http://localhost:8000. Use HTTP rather than opening index.html directly, because the app uses JavaScript modules. With Node.js 18 or later, run `npm test`.
+
+## Files
+
+- `index.html`, `style.css` — interface, lamp illustration and responsive layout
+- `app.mjs` — controls, live chart, preview and microphone/serial lifecycle
+- `model.mjs` — sensor detection, gesture commands, color interpolation and C++ export
+- `microphone.mjs` — RMS-to-ADC conversion
+- `model.test.mjs` — 17 automated checks
+- `firmware/ClapItConfig.h`, `firmware/ClapItController.h` — default non-blocking C++ controller
+
+## Arduino integration
+
+Include `ClapItController.h` in one sketch translation unit. Continuously call `updateLamp(rawReading, millis())`, then apply the returned global `.brightness` (0–255) and unscaled `.color.r/g/b` with your LED library. Use the website's copied configuration after calibration. Hardware pins and LED drivers belong in the sketch. Do not add blocking delays.
+
+## Hosting and validation
+
+Standalone files do not provide authentication. Access to the separate private Sites deployment is enforced by Sites. The GitHub version keeps its existing custom domain and root-level static layout; its Pages workflow deploys the current static web files.
+
+Seventeen tests cover brightness steps, exact and state-dependent 2+/3+ gestures, mode separation, consecutive sequence boundaries, direct color wake, exact pause/resume, detector thresholds, microphone conversion and simulated audio gestures. The generated C++11 controller is compiled and checked against the same behavior. Physical microphone and Arduino input still need testing on the user's device.

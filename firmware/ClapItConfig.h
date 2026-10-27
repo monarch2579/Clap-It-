@@ -17,10 +17,10 @@ constexpr RGB COLORS[3] = {
   { 0, 255, 0 },
   { 0, 0, 255 }
 };
-// Sleep: 1 clap wakes at level 1.
+// Sleep: 1 clap wakes in white; 2+ claps wake in colors (level 1).
 // Brightness: 1 clap -> level 2 -> level 3 -> sleep.
-// Awake: 3 claps start colors at the current brightness.
-// Colors: 1 clap freezes the current color; 2 claps turn off.
+// Awake: 3+ claps start colors at the current brightness.
+// Colors: 1 clap pauses/resumes at the current color; 2+ claps turn off.
 // Only consecutive claps belong to the same command.
 // A quiet gap ends the command and resets its count to zero.
 // Other gestures are ignored. Brightness is global, RGB unscaled.
