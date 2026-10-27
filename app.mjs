@@ -75,9 +75,9 @@ function renderOutput(now=performance.now()){
  $('windowLabel').textContent=count?`Pause ${(Math.max(0,config.window-(now-detector.lastGesture))/1000).toFixed(1)} s to finish`:'Ready for a new sequence';
  if(!count&&detector.completed)$('eventNote').textContent=`Sequence complete · ${detector.lastCount===4?'4+':detector.lastCount} clap${detector.lastCount===1?'':'s'} · count reset`;
  $('brightnessPercent').innerHTML=`${percent}<span>%</span>`;
- $('lampLabel').textContent=detector.mode==='sleep'?'Sleeping · clap once to wake':detector.mode==='colors'?(detector.paused?'Color paused':'RGB color cycle'):`Level ${lamp.index+1} · ${percent}% brightness`;
+ $('lampLabel').textContent=detector.mode==='sleep'?'Sleeping · 1 or 2+ claps to wake':detector.mode==='colors'?(detector.paused?'Color paused':'RGB color cycle'):`Level ${lamp.index+1} · ${percent}% brightness`;
  $('gestureResult').textContent=detector.lastAction;
- $('colorCycleNote').textContent=detector.mode==='colors'?(detector.paused?'Paused at this exact color · double clap to turn off':`Smooth 5 s transitions · ${Math.round((detector.phase%5000)/50)}% to next color`):'Warm white in brightness mode · RGB cycle on triple clap';
+ $('colorCycleNote').textContent=detector.mode==='colors'?(detector.paused?'Paused · 1 clap resumes, 2+ claps turn off':`Smooth 5 s transitions · ${Math.round((detector.phase%5000)/50)}% to next color`):'White: 1 clap · colors: 2+ from sleep, 3+ while awake';
  $('activeLevel').textContent=detector.mode==='sleep'?'ASLEEP':detector.mode==='colors'?(detector.paused?'PAUSED':'COLORS'):`LEVEL 0${lamp.index+1}`;
  $('lampScene').style.setProperty('--lamp',lamp.color);
  $('lampGlow').style.opacity=lamp.brightness/255*.6;

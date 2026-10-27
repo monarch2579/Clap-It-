@@ -11,14 +11,15 @@ struct LampOutput { uint8_t brightness; RGB color; };
 void applyGesture(uint8_t count) {
   if (mode == Mode::Sleep) {
     if (count == 1) { mode = Mode::Brightness; level = 0; }
+    else if (count >= 2) { mode = Mode::Colors; level = 0; colorPhase = 0; paused = false; }
   } else if (mode == Mode::Brightness) {
     if (count == 1) {
       if (level < 2) ++level; else mode = Mode::Sleep;
-    } else if (count == 3) {
+    } else if (count >= 3) {
       mode = Mode::Colors; colorPhase = 0; paused = false;
     }
-  } else if (count == 2) { mode = Mode::Sleep; paused = false; }
-  else if (count == 1) paused = true;
+  } else if (count >= 2) { mode = Mode::Sleep; paused = false; }
+  else if (count == 1) paused = !paused;
 }
 
 uint8_t mixChannel(uint8_t a, uint8_t b, uint32_t phase) {
